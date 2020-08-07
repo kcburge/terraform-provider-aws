@@ -256,14 +256,21 @@ func resourceAwsAcmCertificateRead(d *schema.ResourceData, meta interface{}) err
 		d.Set("arn", resp.Certificate.CertificateArn)
 		d.Set("certificate_authority_arn", resp.Certificate.CertificateAuthorityArn)
 
-		if err := d.Set("subject_alternative_names", cleanUpSubjectAlternativeNames(resp.Certificate)); err != nil {
-			return resource.NonRetryableError(err)
-		}
+		sans := cleanupSubjectAlternativeNames(resp.Certificate, d)
 
 		domainValidationOptions, emailValidationOptions, err := convertValidationOptions(resp.Certificate)
-
 		if err != nil {
 			return resource.RetryableError(err)
+		}
+		sortDomainValidationOptions(resp.Certificate.DomainName, sans, domainValidationOptions)
+
+		// subject_alternative_names MUST be set after the above
+		// RetryableError, since sometimes the
+		// subject_alternative_names response from AWS is empty. We
+		// must ensure the domain validation options are good before
+		// actually storing this value, since we read its value up above.
+		if err := d.Set("subject_alternative_names", sans); err != nil {
+			return resource.NonRetryableError(err)
 		}
 
 		if err := d.Set("domain_validation_options", domainValidationOptions); err != nil {
@@ -325,16 +332,38 @@ func resourceAwsAcmCertificateUpdate(d *schema.ResourceData, meta interface{}) e
 	return resourceAwsAcmCertificateRead(d, meta)
 }
 
-func cleanUpSubjectAlternativeNames(cert *acm.CertificateDetail) []string {
+func cleanupSubjectAlternativeNames(cert *acm.CertificateDetail, d *schema.ResourceData) []string {
 	sans := cert.SubjectAlternativeNames
 	vs := make([]string, 0)
-	for _, v := range sans {
-		if aws.StringValue(v) != aws.StringValue(cert.DomainName) {
-			vs = append(vs, aws.StringValue(v))
+	dn := aws.StringValue(cert.DomainName)
+
+	// create unique list of remote sans
+	m := make(map[string]bool)
+	for _, r := range sans {
+		v := aws.StringValue(r)
+		if v != dn {
+			m[v] = true
 		}
 	}
-	return vs
 
+	// add sans in existing order, noting sans we saw
+	for _, r := range d.Get("subject_alternative_names").([]interface{}) {
+		v := strings.TrimSuffix(r.(string), ".")
+		_, found := m[v]
+		if found {
+			delete(m, v)
+			vs = append(vs, v)
+		}
+	}
+
+	// add any remote sans not already in subject_alternative_names.
+	for v := range m {
+		if v != dn {
+			vs = append(vs, v)
+		}
+	}
+
+	return vs
 }
 
 func convertValidationOptions(certificate *acm.CertificateDetail) ([]map[string]interface{}, []string, error) {
@@ -374,6 +403,29 @@ func convertValidationOptions(certificate *acm.CertificateDetail) ([]map[string]
 	}
 
 	return domainValidationResult, emailValidationResult, nil
+}
+
+// sortDomainValidationOptions sorts a slice of domain validation options
+// according to the order of domain names in the subject alternatnive names slice
+func sortDomainValidationOptions(domainName *string, subjectAlternativeNames []string, domainValidationOptions []map[string]interface{}) {
+	sans := append([]string{*domainName}, subjectAlternativeNames...)
+
+	// validation method is email and domainValidationOptions is empty
+	if len(sans) != len(domainValidationOptions) {
+		return
+	}
+
+	// This works because the requesting a certificate is either by email or by dns,
+	// but not mixed and furthermore the method cannot be changed after creation.
+	for i, san := range sans {
+		for j, opt := range domainValidationOptions {
+			if san == opt["domain_name"].(string) {
+				domainValidationOptions[i], domainValidationOptions[j] =
+					domainValidationOptions[j], domainValidationOptions[i]
+				break
+			}
+		}
+	}
 }
 
 func resourceAwsAcmCertificateDelete(d *schema.ResourceData, meta interface{}) error {

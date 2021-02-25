@@ -91,10 +91,6 @@ func resourceAwsLightsailInstance() *schema.Resource {
 				Type:     schema.TypeFloat,
 				Computed: true,
 			},
-			"ipv6_address": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
 			"is_static_ip": {
 				Type:     schema.TypeBool,
 				Computed: true,
@@ -209,7 +205,6 @@ func resourceAwsLightsailInstanceRead(d *schema.ResourceData, meta interface{}) 
 	d.Set("created_at", i.CreatedAt.Format(time.RFC3339))
 	d.Set("cpu_count", i.Hardware.CpuCount)
 	d.Set("ram_size", i.Hardware.RamSizeInGb)
-	d.Set("ipv6_address", i.Ipv6Address)
 	d.Set("is_static_ip", i.IsStaticIp)
 	d.Set("private_ip_address", i.PrivateIpAddress)
 	d.Set("public_ip_address", i.PublicIpAddress)

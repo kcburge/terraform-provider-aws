@@ -7,4 +7,4 @@ docker run \
        -e GOARCH=amd64 \
        -e CGO_ENABLED=0 \
        golang:1.15.6 \
-       go build -o  terraform-provider-aws_v2.70.0_x4 -ldflags="-s -w" -v
+       go build -o terraform-provider-aws_v2.70.0_x4 -ldflags="-s -w" -v
